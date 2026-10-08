@@ -5313,8 +5313,8 @@ function cpSelfTest() {
 /* ---------- inisialisasi ---------- */
 function cpInit() {
   const main = document.getElementById('main');
-  if (typeof CP_DB === 'undefined' || !CP_DB || !Array.isArray(CP_DB.entries) || !CP_DB.entries.length) {
-    if (main) main.appendChild(el('div', { class: 'empty' }, el('div', { class: 'ei' }, icon('alert', 22)), el('div', { text: 'Tidak dapat memuat data.' })));
+  if (typeof CP_DB === 'undefined' || !CP_DB || !Array.isArray(CP_DB.entries)) {
+    if (main) main.appendChild(el('div', { class: 'empty' }, el('div', { class: 'ei' }, icon('alert', 22)), el('div', { text: 'Basis data belum siap.' })));
     return;
   }
   CPSettings.load();
@@ -5393,7 +5393,7 @@ function cpShowBootStatus(message, detail){
 }
 
 async function cpFetchDb(path){
-  const r=await fetch(path,{cache:'no-store'});
+  const r=await fetch(path,{cache:'force-cache'});
   if(!r.ok) throw new Error(path+' ('+r.status+')');
   const data=await r.json();
   if(!Array.isArray(data)) throw new Error(path+' bukan array JSON');
@@ -5423,40 +5423,43 @@ async function cpLoadExternalDatabase(){
 }
 
 async function cpBoot(){
-  cpShowBootStatus('Menyiapkan CallPage…','Database akan dimuat bertahap agar HP tidak blank.');
+  /* Render the actual CallPage shell immediately. The large external database is filled in behind it. */
   try{
-    /* Muat bagian pertama lalu tampilkan aplikasi. */
-    const first=await cpFetchDb('data/db-001.json').catch(()=>cpFetchDb('db-001.json'));
-    CP_DB.entries=first;
-    CP_BUILT_CACHE=null; CP_STATS_CACHE=null; CP_STATS_REV++;
+    if (typeof CP_DB !== 'undefined' && CP_DB && Array.isArray(CP_DB.entries)) CP_DB.entries=[];
     cpInit();
-    cpShowBootStatus('CallPage siap','Sedang melanjutkan pemuatan database…');
-    /* Lanjutkan bagian 2 dan 3 di belakang layar. */
-    const rest=['db-002.json','db-003.json'];
-    for(let i=0;i<rest.length;i++){
-      const name=rest[i];
-      let data=null;
-      try{data=await cpFetchDb('data/'+name)}catch(e){data=await cpFetchDb(name)}
+    cpRender();
+  }catch(err){
+    console.error('CallPage initial render failed',err);
+    const root=document.getElementById('main') || document.getElementById('app');
+    if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>CallPage gagal dibuka</h2><p style="color:#ffcf33">'+String(err.message||err)+'</p></div>';
+    return;
+  }
+
+  /* Load the 17,500 records in the background; never replace the app with a loading screen. */
+  try{
+    const parts=['db-001.json','db-002.json','db-003.json'];
+    const prefixes=['data/',''];
+    CP_DB.entries=[];
+    for(let i=0;i<parts.length;i++){
+      let data=null, lastErr=null;
+      for(const prefix of prefixes){
+        try{ data=await cpFetchDb(prefix+parts[i]); break; }
+        catch(err){ lastErr=err; }
+      }
+      if(!data) throw new Error('Database '+parts[i]+' gagal dimuat. '+String(lastErr&&lastErr.message||lastErr||''));
       for(const item of data) CP_DB.entries.push(item);
+      data=null;
       CP_BUILT_CACHE=null; CP_STATS_CACHE=null; CP_STATS_REV++;
-      cpShowBootStatus('CallPage siap · database '+(i+2)+' dari 3','Total '+CP_DB.entries.length.toLocaleString('id-ID')+' entri.');
       cpRender();
       await new Promise(requestAnimationFrame);
-      data=null;
     }
     if(CP_DB.entries.length!==17500) throw new Error('Jumlah database tidak sesuai: '+CP_DB.entries.length+' (seharusnya 17.500)');
     cpRender();
   }catch(err){
-    console.error(err);
-    const root=document.getElementById('main') || document.getElementById('app');
-    if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>CallPage gagal memuat database</h2><p style="color:#ffcf33">'+String(err.message||err)+'</p><p style="color:#aaa;font-size:13px">Pastikan db-001.json, db-002.json, dan db-003.json berada di folder <b>data</b> pada GitHub.</p></div>';
+    console.error('CallPage database background load failed',err);
+    /* Keep the usable shell on screen and show a small non-blocking notice. */
+    try{ cpToast('Database belum selesai dimuat. Periksa koneksi atau folder data.'); }catch(e){}
   }
-}
-
-async function cpBoot(){
-  cpShowBootStatus('Sedang memuat 17.500 data CallPage…','Database disimpan terkompresi agar lebih ringan untuk HP dan GitHub.');
-  try{ await cpLoadExternalDatabase(); cpInit(); }
-  catch(err){ console.error(err); const root=document.getElementById('app'); if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>Database CallPage belum termuat</h2><p>Periksa bahwa <b>db-001.json.gz</b>, <b>db-002.json.gz</b>, dan <b>db-003.json.gz</b> sudah di-upload ke folder <b>data</b>.</p><p style="color:#ffcf33">'+String(err.message||err)+'</p><p style="color:#aaa;font-size:13px">Aplikasi sengaja tidak menampilkan layar hitam kosong agar masalah pemuatan dapat terlihat.</p></div>'; }
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', cpBoot);
