@@ -5387,7 +5387,7 @@ function cpInit() {
 }
 
 function cpShowBootStatus(message, detail){
-  const root=document.getElementById('app');
+  const root=document.getElementById('main') || document.getElementById('app');
   if(!root) return;
   root.innerHTML='<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:28px;box-sizing:border-box;background:#000;color:#fff;font-family:system-ui,sans-serif;text-align:center"><div style="max-width:420px"><div style="width:42px;height:42px;border:4px solid rgba(255,255,255,.18);border-top-color:#ffd21c;border-radius:50%;margin:0 auto 18px;animation:cpSpin 1s linear infinite"></div><h2 style="margin:0 0 10px;font-size:20px">Memuat CallPage</h2><p style="margin:0;color:#c9c9cf;line-height:1.55">'+message+'</p>'+(detail?'<p style="margin:12px 0 0;color:#8f8f98;font-size:12px">'+detail+'</p>':'')+'</div></div><style>@keyframes cpSpin{to{transform:rotate(360deg)}}</style>';
 }
@@ -5403,7 +5403,7 @@ async function cpFetchDb(path){
 async function cpLoadExternalDatabase(){
   const parts=['db-001.json','db-002.json','db-003.json'];
   const prefixes=['data/',''];
-  const loaded=[];
+  CP_DB.entries=[];
   for(let i=0;i<parts.length;i++){
     const name=parts[i];
     let data=null, lastErr=null, usedPath='';
@@ -5413,18 +5413,52 @@ async function cpLoadExternalDatabase(){
       catch(err){ lastErr=err; }
     }
     if(!data) throw new Error('Database '+name+' gagal dimuat. Pastikan file ada di folder data/. '+String(lastErr&&lastErr.message||lastErr||''));
-    loaded.push(data);
-    cpShowBootStatus('Database '+(i+1)+' dari 3 sedang dimuat…', name+' · '+data.length.toLocaleString('id-ID')+' entri · '+usedPath);
+    for(const item of data) CP_DB.entries.push(item);
+    data=null;
+    CP_BUILT_CACHE=null; CP_STATS_CACHE=null; CP_STATS_REV++;
+    cpShowBootStatus('Database '+(i+1)+' dari 3 selesai dimuat', name+' · total '+CP_DB.entries.length.toLocaleString('id-ID')+' entri · '+usedPath);
+    await new Promise(requestAnimationFrame);
   }
-  CP_DB.entries=loaded.flat();
   if(CP_DB.entries.length!==17500) throw new Error('Jumlah database tidak sesuai: '+CP_DB.entries.length+' (seharusnya 17.500)');
 }
 
 async function cpBoot(){
-  cpShowBootStatus('Sedang memuat 17.500 data CallPage…','Mohon tunggu sampai database selesai dimuat.');
-  try{ await cpLoadExternalDatabase(); cpInit(); }
-  catch(err){ console.error(err); const root=document.getElementById('app'); if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>Database CallPage belum termuat</h2><p>Periksa bahwa <b>db-001.json</b>, <b>db-002.json</b>, dan <b>db-003.json</b> sudah di-upload ke folder <b>data</b>.</p><p style="color:#ffcf33">'+String(err.message||err)+'</p><p style="color:#aaa;font-size:13px">Aplikasi sengaja tidak menampilkan layar hitam kosong agar masalah pemuatan dapat terlihat.</p></div>'; }
+  cpShowBootStatus('Menyiapkan CallPage…','Database akan dimuat bertahap agar HP tidak blank.');
+  try{
+    /* Muat bagian pertama lalu tampilkan aplikasi. */
+    const first=await cpFetchDb('data/db-001.json').catch(()=>cpFetchDb('db-001.json'));
+    CP_DB.entries=first;
+    CP_BUILT_CACHE=null; CP_STATS_CACHE=null; CP_STATS_REV++;
+    cpInit();
+    cpShowBootStatus('CallPage siap','Sedang melanjutkan pemuatan database…');
+    /* Lanjutkan bagian 2 dan 3 di belakang layar. */
+    const rest=['db-002.json','db-003.json'];
+    for(let i=0;i<rest.length;i++){
+      const name=rest[i];
+      let data=null;
+      try{data=await cpFetchDb('data/'+name)}catch(e){data=await cpFetchDb(name)}
+      for(const item of data) CP_DB.entries.push(item);
+      CP_BUILT_CACHE=null; CP_STATS_CACHE=null; CP_STATS_REV++;
+      cpShowBootStatus('CallPage siap · database '+(i+2)+' dari 3','Total '+CP_DB.entries.length.toLocaleString('id-ID')+' entri.');
+      cpRender();
+      await new Promise(requestAnimationFrame);
+      data=null;
+    }
+    if(CP_DB.entries.length!==17500) throw new Error('Jumlah database tidak sesuai: '+CP_DB.entries.length+' (seharusnya 17.500)');
+    cpRender();
+  }catch(err){
+    console.error(err);
+    const root=document.getElementById('main') || document.getElementById('app');
+    if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>CallPage gagal memuat database</h2><p style="color:#ffcf33">'+String(err.message||err)+'</p><p style="color:#aaa;font-size:13px">Pastikan db-001.json, db-002.json, dan db-003.json berada di folder <b>data</b> pada GitHub.</p></div>';
+  }
 }
+
+async function cpBoot(){
+  cpShowBootStatus('Sedang memuat 17.500 data CallPage…','Database disimpan terkompresi agar lebih ringan untuk HP dan GitHub.');
+  try{ await cpLoadExternalDatabase(); cpInit(); }
+  catch(err){ console.error(err); const root=document.getElementById('app'); if(root) root.innerHTML='<div style="padding:24px;font-family:system-ui;min-height:100vh;box-sizing:border-box;background:#000;color:#fff"><h2>Database CallPage belum termuat</h2><p>Periksa bahwa <b>db-001.json.gz</b>, <b>db-002.json.gz</b>, dan <b>db-003.json.gz</b> sudah di-upload ke folder <b>data</b>.</p><p style="color:#ffcf33">'+String(err.message||err)+'</p><p style="color:#aaa;font-size:13px">Aplikasi sengaja tidak menampilkan layar hitam kosong agar masalah pemuatan dapat terlihat.</p></div>'; }
+}
+
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', cpBoot);
 else cpBoot();
 
